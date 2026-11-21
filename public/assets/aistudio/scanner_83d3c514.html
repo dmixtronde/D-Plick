@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+    <title>D-Plick Scanner</title>
+    <script src="{{ url_for('static', filename='socket.io.js') }}"></script>
+    <script src="{{ url_for('static', filename='cv.js') }}"></script>
+    <script src="{{ url_for('static', filename='aruco.js') }}"></script>
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: #222; color: white; font-family: Arial, sans-serif; }
+        
+        #login-screen { display: none; padding-top: 20vh; text-align: center; }
+        input[type="password"] { padding: 12px; font-size: 18px; width: 80%; border-radius: 5px; text-align: center;}
+        .btn-login { margin-top: 15px; padding: 12px 30px; background: #2ed573; border: none; border-radius: 5px; color: white; font-size: 18px; cursor: pointer; }
+        
+        #app-screen { 
+            display: none; 
+            flex-direction: column; 
+            height: 100%; 
+            height: 100dvh; /* Khớp chính xác chiều cao thực tế trên Chrome/Safari điện thoại */
+        }
+        .header { background: #333; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: bold; }
+        .header span { color: #ffeb3b; }
+        
+        .camera-container { flex: 1; position: relative; background: #111; width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        #trackpad-hint { position: absolute; color: #555; font-size: 24px; font-weight: bold; pointer-events: none; }
+        
+        video { width: 100%; height: 100%; object-fit: cover; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        
+        .controls { 
+            padding: 8px 8px 4px 8px; 
+            padding-bottom: max(4px, env(safe-area-inset-bottom)); /* Nằm sát đáy, tự né thanh vuốt trên iPhone mới */
+            background: #111; 
+        }
+        .row-btn { 
+            display: flex; 
+            justify-content: space-between; 
+            gap: 8px; 
+            margin-bottom: 6px; 
+        }
+        .row-btn:last-child { 
+            margin-bottom: 0; /* Xóa khoảng trống thừa dưới hàng nút cuối cùng */
+        }
+
+        button { flex: 1; padding: 14px 5px; font-size: 15px; border-radius: 6px; border: none; font-weight: bold; color: white; cursor: pointer; touch-action: manipulation; }
+        
+        .btn-cam { background: #007bff; }
+        .btn-cam.active { background: #ff4757; }
+        .btn-finish { background: #2ed573; }
+        /*.btn-nav { background: #555; flex: 0.3; } */ 
+        .btn-nav {
+            background: #475569;
+            color: white;
+            font-size: 16px;       /* Phóng to chữ */
+            font-weight: bold;
+            padding: 14px 10px;    /* Tăng độ cao (padding dọc 14px) */
+            border: none;
+            border-radius: 8px;
+            flex: 1;               /* Giãn đều kích thước lấp đầy khoảng trống */
+            margin: 0 4px;
+            min-height: 54px;      /* Chiều cao tối thiểu 54px chuẩn cho ngón tay bấm */
+        }
+        /* Hiệu ứng khi chạm/bấm vào nút */
+        .btn-nav:active {background: #334155;transform: scale(0.97);}
+
+        .btn-unlock { background: #f39c12; flex: 0.9; font-size: 13px; padding: 6px 2px; }
+        .btn-random { background: #8b5cf6; flex: 0.9; font-size: 13px; padding: 6px 2px; }
+        .btn-random:active { background: #7c3aed; transform: scale(0.97); }
+
+        #status { font-size: 14px; text-align: center; padding-top: 5px; color: #ffeb3b; min-height: 20px; }
+    </style>
+</head>
+<body>
+    <div id="login-screen">
+        <img src="{{ url_for('static', filename='logo.jpg') }}" alt="Logo" style="display: block; max-width: 150px; margin: 0 auto 15px auto; border-radius: 8px;">
+        <h2>NHẬP MẬT KHẨU</h2>
+        <p>(Click vào '🔑 Mật khẩu' ở D-Plick để xem)</p>
+        <!-- <input type="password" id="passInput"><br> -->
+        <input type="password" inputmode="numeric" pattern="[0-9]*" id="passInput"><br>
+        <button type="button" class="btn-login" onclick="checkPass()">Kết Nối</button>
+    </div>
+
+    <div id="app-screen">
+        <div class="header">
+            <button type="button" id="btnHideAll" onclick="toggleHideAll()" 
+                    style="flex: 0 0 auto; padding: 6px 10px; font-size: 15px; background: #475569; border-radius: 6px; display: flex; align-items: center; gap: 6px;">
+                <span id="hide-icon" style="font-size: 13px;">👁️</span>
+                <span>CÂU <span id="q-num">{{ question }}</span></span>
+            </button>
+
+            <!-- KHU VỰC HIỂN THỊ NÚT ĐÚNG/SAI ĐỘNG -->
+            <div id="sub-questions" style="display: none; text-align: center; background: #222; padding: 0px 0; border-bottom: 1px solid #444;"></div>
+            <!-- <div id="status">Sẵn sàng</div> -->
+        </div>
+
+        <div class="camera-container" id="cam-box">
+            <div id="trackpad-hint">VÙNG RÊ CHUỘT</div>
+            
+            <!-- NÚT BẬT/TẮT ĐÈN LASER ẢO -->
+            <button type="button" id="btnLaser" onclick="toggleLaser()"
+                style="position: absolute; top: 12px; right: 12px; z-index: 20; width: auto; flex: none; padding: 10px 16px; background: #475569; border: 2px solid #94a3b8; border-radius: 20px; font-size: 14px;">
+                🔴 Laser: TẮT
+            </button>
+
+
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+        
+            <!-- KHUNG NGẮM CẮT ẢNH: Xóa làm mờ, nhận tỷ lệ động -->
+            <div id="crop-guide" style="display: none; position: absolute; top: 50%; left: 0; width: 100%; aspect-ratio: 16/9; transform: translateY(-50%); pointer-events: none; z-index: 10;">
+                <div style="position: absolute; top: 0; left: 0; width: 20px; height: 20px; border-top: 3px solid #00ff00; border-left: 3px solid #00ff00;"></div>
+                <div style="position: absolute; top: 0; right: 0; width: 20px; height: 20px; border-top: 3px solid #00ff00; border-right: 3px solid #00ff00;"></div>
+                <div style="position: absolute; bottom: 0; left: 0; width: 20px; height: 20px; border-bottom: 3px solid #00ff00; border-left: 3px solid #00ff00;"></div>
+                <div style="position: absolute; bottom: 0; right: 0; width: 20px; height: 20px; border-bottom: 3px solid #00ff00; border-right: 3px solid #00ff00;"></div>
+            </div>
+            <!-- NÚT CHỤP 1 CLICK (Chạm là gửi) -->
+
+            <!--
+            <button id="btnSnap" style="display: none; position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); width: 64px; height: 64px; border-radius: 50%; background: #ffffff; border: 6px solid #d1d5db; cursor: pointer; z-index: 15; box-shadow: 0 0 0 4px #ffffff, 0 4px 10px rgba(0,0,0,0.5);" onclick="snapAndSend()"></button>
+            -->
+            <button id="btnSnap" style="display: none; position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); width: 64px; height: 64px; border-radius: 50%; background: #ffffff; border: 6px solid #d1d5db; cursor: pointer; z-index: 15; box-shadow: 0 0 0 4px #ffffff, 0 4px 10px rgba(0,0,0,0.5);" onclick="handleImageButton()"></button>
+        </div>
+
+        <div class="controls">
+            <div class="row-btn">
+                <button type="button" class="btn-cam" id="btnCam" onclick="toggleCamera()">BẬT CAMERA</button>
+                <button type="button" class="btn-random" onclick="triggerRandomStudent()">🎲 GỌI HS</button>
+                <!-- Nút chốt đáp án tích hợp 2 chức năng -->
+                <button type="button" class="btn-finish" id="btnToggleResult" onclick="toggleResultBoard()">CHỐT ĐÁP ÁN</button>
+            </div>
+
+            <div class="row-btn">
+                <button type="button" class="btn-nav" onclick="changeQ('prev')"><< Slide</button>
+                <!-- Nút Xếp hạng/Thống kê -->
+                <button type="button" class="btn-unlock" onclick="toggleRanking()">🏆 XẾP HẠNG</button>
+                <button type="button" class="btn-nav" onclick="changeQ('next')">Slide >></button>
+            </div>
+            <!---
+            <div class="row-btn">
+                <button type="button" class="btn-nav" onclick="changeQ('prev')"><< Slide</button>
+                
+                <button type="button" class="btn-unlock" onclick="toggleRanking()">XẾP HẠNG</button>
+                <button type="button" class="btn-nav" onclick="changeQ('next')">Slide >></button>
+            </div>
+            -->
+        </div>
+    </div>
+
+    <script>
+        //const socket = io();
+        const socket = io({ 
+                transports: ['websocket'], // Ép dùng luôn chuẩn thời gian thực
+                upgrade: false 
+            });
+        // --- ANTI-THROTTLE CHO IPHONE / IOS ---
+        setInterval(() => {
+            if (!isScanning) {
+                // Chỉ gửi 1 gói tin siêu nhẹ lặp lại để giữ kết nối không bị iOS cho vào trạng thái ngủ
+                socket.emit('mouse_move', {dx: 0, dy: 0}); 
+            }
+        }, 1000);
+
+        const REQ_PASS = "{{ req_pass }}"; 
+        
+        let stream = null;
+        let isScanning = false;
+        let scanInterval = null;
+        
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d'); 
+        let detector = new AR.Detector();
+        
+        //let currentQuestion = parseInt("{{ question }}") || 1;
+        let currentQuestion = parseInt("{{ question }}") || 0;
+        let confirmedScans = {}; 
+        let throttleSend = {};   
+
+        window.onload = () => { 
+            if (REQ_PASS === "") {
+                document.getElementById('app-screen').style.display = 'flex';
+            } else {
+                document.getElementById('login-screen').style.display = 'block';
+            }
+        };
+        
+        function checkPass() {
+            if (document.getElementById('passInput').value === REQ_PASS) {
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('app-screen').style.display = 'flex';
+            } else alert("Sai mật khẩu!");
+        }
+
+        let camBox = document.getElementById('cam-box');
+        let tX = 0, tY = 0, isTap = false;
+        let pendingDx = 0, pendingDy = 0;
+        let rafId = null;
+
+        function sendLoop() {
+            let sendX = Math.trunc(pendingDx);
+            let sendY = Math.trunc(pendingDy);
+            if (sendX !== 0 || sendY !== 0) {
+                socket.emit('mouse_move', { dx: sendX, dy: sendY });
+                pendingDx -= sendX;
+                pendingDy -= sendY;
+            }
+            rafId = requestAnimationFrame(sendLoop);
+        }
+
+        camBox.addEventListener('touchstart', e => {
+            if (isScanning || e.target.closest('button')) return;
+            tX = e.touches[0].clientX;
+            tY = e.touches[0].clientY;
+            isTap = true;
+            pendingDx = 0;
+            pendingDy = 0;
+            if (!rafId) rafId = requestAnimationFrame(sendLoop);
+        });
+
+        camBox.addEventListener('touchmove', e => {
+            if (isScanning || e.target.closest('button')) return;
+            e.preventDefault();
+            isTap = false;
+            let nX = e.touches[0].clientX, nY = e.touches[0].clientY;
+            pendingDx += (nX - tX) * 1.5; // Độ nhạy đầm tay (có thể chỉnh 1.2 - 1.8)
+            pendingDy += (nY - tY) * 1.5;
+            tX = nX;
+            tY = nY;
+        }, { passive: false });
+
+        camBox.addEventListener('touchend', e => {
+            if (isScanning || e.target.closest('button')) return;
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+            if (isTap) socket.emit('mouse_click');
+        });
+
+        function stopCameraSafely() {
+            if (!isScanning) return;
+            isScanning = false;
+            
+            document.getElementById('btnLaser').style.display = 'block';
+
+            if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+            if (stream) {
+                stream.getTracks().forEach(track => { try { track.stop(); } catch(e) {} });
+                stream = null;
+            }
+            try { video.pause(); video.srcObject = null; } catch(e) {}
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const btn = document.getElementById('btnCam');
+            if (btn) {
+                btn.innerText = "BẬT CAMERA";
+                btn.classList.remove('active');
+            }
+            document.getElementById('trackpad-hint').style.display = 'block';
+            //document.getElementById('status').innerText = "Đã tắt Cam (Dùng như Chuột laptop)";
+
+            document.getElementById('crop-guide').style.display = 'none';
+            resetSnapButton(); // <--- ĐẢM BẢO NÚT QUAY VỀ MẶC ĐỊNH KHI BẬT LẠI CAM
+            document.getElementById('btnSnap').style.display = 'none';
+        }
+
+       let isLaserOn = false;
+
+        function toggleLaser() {
+            isLaserOn = !isLaserOn;
+            socket.emit('toggle_laser', { active: isLaserOn });
+            
+            const btn = document.getElementById('btnLaser');
+            if (isLaserOn) {
+                btn.innerText = "🔴 Laser: BẬT";
+                btn.style.background = "#dc2626";
+                btn.style.borderColor = "#fca5a5";
+            } else {
+                btn.innerText = "🔴 Laser: TẮT";
+                btn.style.background = "#475569";
+                btn.style.borderColor = "#94a3b8";
+            }
+        }
+        
+        function toggleCamera() {
+            if (isScanning) {
+                stopCameraSafely();
+                document.getElementById('crop-guide').style.display = 'none';
+                document.getElementById('btnSnap').style.display = 'none';
+            } else {
+
+                if (isLaserOn) toggleLaser();
+                document.getElementById('btnLaser').style.display = 'none';
+
+                // Đẩy lên 4K (3840x2160) để ảnh siêu nét. Nếu điện thoại không hỗ trợ 4K, nó sẽ tự lùi về mức cao nhất có thể.
+                navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment', width: { ideal: 3840 }, height: { ideal: 2160 } } 
+                }).then(s => {
+                    stream = s; video.srcObject = stream; isScanning = true;
+                    document.getElementById('trackpad-hint').style.display = 'none';
+                    document.getElementById('crop-guide').style.display = 'block';
+                    document.getElementById('btnSnap').style.display = 'block';
+                    
+                    const btn = document.getElementById('btnCam');
+                    btn.innerText = "TẮT CAMERA"; btn.classList.add('active');
+                    //document.getElementById('status').innerText = `Đang mở Cam - Sẵn sàng quét Câu ${currentQuestion}`;
+                    video.play();
+                    
+                    video.onloadedmetadata = () => {
+                        // KÉO XUỐNG 640x480 ĐỂ THUẬT TOÁN QUÉT QR VẪN MƯỢT MÀ VÀ QUÉT NHIỀU MÃ CÙNG LÚC
+                        //let scale = 640 / Math.max(video.videoWidth, video.videoHeight);
+                        //Tăng độ phân giải khi quét
+                        let scale = 960 / Math.max(video.videoWidth, video.videoHeight);
+                        canvas.width = video.videoWidth * scale; 
+                        canvas.height = video.videoHeight * scale;
+                        scanInterval = setInterval(scanFrame, 150);
+                    };
+                }).catch(err => alert("Lỗi Camera: " + err));
+            }
+        }
+
+        
+        function scanFrame() {
+            if (!isScanning || !video || video.readyState !== 4) return;
+            try {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                let markers = detector.detect(imageData);
+                
+                if (markers.length > 0) {
+                    let now = Date.now();
+                    markers.forEach(marker => {
+                        let id = marker.id; let c = marker.corners;
+                        let mids = [ { y: (c[0].y+c[1].y)/2, ans: 'A' }, { y: (c[1].y+c[2].y)/2, ans: 'B' }, { y: (c[2].y+c[3].y)/2, ans: 'C' }, { y: (c[3].y+c[0].y)/2, ans: 'D' } ];
+                        mids.sort((a, b) => a.y - b.y);
+                        let answer = mids[0].ans;
+
+                        let isConfirmed = (confirmedScans[id] === answer);
+                      
+                        if (!isConfirmed) {
+                            // --- KIỂM TRA MÃ CÂU TRƯỚC KHI GỬI ---
+                            if (currentQuestion === 0) {
+                                //document.getElementById('status').innerText = "Chưa chiếu câu hỏi, không thể gửi!";
+                            } 
+                            // --- NẾU LÀ CÂU HỎI HỢP LỆ THÌ MỚI GỬI (Code cũ của bạn) ---
+                            //else if (!throttleSend[id] || (now - throttleSend[id] > 800)) {
+                            //    socket.emit('submit_answer', { question_id: currentQuestion, id: id, answer: answer });
+                            //    throttleSend[id] = now;
+                            //}
+
+                            // --- NẾU LÀ CÂU HỎI HỢP LỆ THÌ MỚI GỬI ---
+                            else if (!throttleSend[id] || (now - throttleSend[id] > 800)) {
+                                // NẾU LÀ CÂU ĐÚNG/SAI -> Gửi mã câu kèm chữ cái (Ví dụ: '1a', '1b')
+                                let qID_to_send = (currentFullAnswer.length > 1) 
+                                                ? currentQuestion + subLetters[currentSubQuestion] 
+                                                : currentQuestion;
+
+                                socket.emit('submit_answer', { question_id: qID_to_send, id: id, answer: answer });
+                                throttleSend[id] = now;
+                            }
+                        }
+
+
+                        let uiColor = isConfirmed ? "#4CAF50" : "#ffeb3b";
+                        
+                        ctx.strokeStyle = uiColor;
+                        ctx.lineWidth = 4;
+                        ctx.beginPath();
+                        ctx.moveTo(c[0].x, c[0].y); ctx.lineTo(c[1].x, c[1].y);
+                        ctx.lineTo(c[2].x, c[2].y); ctx.lineTo(c[3].x, c[3].y);
+                        ctx.closePath(); ctx.stroke();
+                        
+                        ctx.fillStyle = uiColor;
+                        ctx.font = "bold 22px Arial";
+                        ctx.fillText(`${id}-${answer}`, c[0].x, c[0].y - 10);
+                    });
+                }
+            } catch (e) { }
+        }
+
+        socket.on('update_live', data => {
+            // Đồng bộ luôn số câu nếu Server phản hồi số câu mới
+            if (data.question_id && parseInt(data.question_id) !== currentQuestion) {
+                currentQuestion = parseInt(data.question_id);
+                document.getElementById('q-num').innerText = currentQuestion;
+                confirmedScans = {};
+                throttleSend = {};
+            }
+            confirmedScans[data.id] = data.answer;
+            //document.getElementById('status').innerText = `✅ Đã lưu: ID ${data.id} -> ${data.answer}`;
+        });
+
+
+
+
+        function changeQ(action) { socket.emit('change_question', { action: action }); }
+        
+        let isResultBoardOpen = false;
+
+        // 1. NÚT CHỐT ĐÁP ÁN (Bật/Tắt)
+        function toggleResultBoard() {
+            let btn = document.getElementById('btnToggleResult');
+            if (!isResultBoardOpen) {
+                // ĐANG ĐÓNG -> BẤM ĐỂ MỞ BẢNG CHỐT
+                if(isScanning) stopCameraSafely();
+                    
+                socket.emit('finish_scan');
+                btn.innerText = "QUÉT TIẾP";
+                btn.style.background = "#f39c12"; // Đổi sang màu cam báo hiệu đang khóa
+                //document.getElementById('status').innerText = "Đã bung bảng & khóa quét!";
+                
+                
+                isResultBoardOpen = true;
+            } else {
+                // ĐANG MỞ -> BẤM ĐỂ THU BẢNG VỀ MÉP
+                socket.emit('unlock_scan');
+                btn.innerText = "CHỐT ĐÁP ÁN";
+                btn.style.background = "#2ed573"; // Trả về màu xanh lá gốc
+                //document.getElementById('status').innerText = "Đã thu bảng, tiếp tục quét!";
+                
+                // Mở khóa lại nút Bật Camera
+                //if(btnCam) {
+                //   btnCam.disabled = false;
+                //    btnCam.style.opacity = "1";
+                //}
+
+                if(!isScanning) toggleCamera(); // Tự bật cam lại luôn cho tiện
+                isResultBoardOpen = false;
+            }
+        }
+
+        // 2. NÚT BẬT/TẮT BẢNG XẾP HẠNG
+        function toggleRanking() {
+            if(isScanning) stopCameraSafely(); // Tắt cam để tránh quét nhầm khi xem bảng
+            socket.emit('toggle_ranking');
+            //document.getElementById('status').innerText = "Đang Bật/Tắt bảng Xếp hạng!";
+        }
+
+        // 3. NÚT GỌI HỌC SINH NGẪU NHIÊN
+        function triggerRandomStudent() {
+            if (isScanning) stopCameraSafely(); // Tắt cam tránh quét nhầm lúc đang quay số
+            socket.emit('random_student');
+        }
+
+        function setHideButtonUI(isHidden) {
+            let btn = document.getElementById('btnHideAll');
+            let icon = document.getElementById('hide-icon');
+            if (!btn || !icon) return;
+
+            if (isHidden) {
+                icon.innerText = "🔄";
+                btn.style.background = "#0284c7"; // Xanh dương: đang ẩn, bấm để hiện lại
+            } else {
+                icon.innerText = "👁️";
+                btn.style.background = "#475569"; // Xám mặc định: bấm để ẩn hết
+            }
+        }
+
+        function toggleHideAll() {
+            socket.emit('toggle_hide_all');
+        }
+
+        socket.on('screen_hidden_state', data => {
+            setHideButtonUI(data.hidden);
+        });
+    
+
+        function processAndSendNativePhoto(event) {
+            let file = event.target.files[0];
+            if (!file) return;
+            
+            //document.getElementById('status').innerText = "Đang xử lý ảnh chất lượng cao...";
+            
+            let reader = new FileReader();
+            reader.onload = function(e) {
+                let img = new Image();
+                img.onload = function() {
+                    let canvas = document.createElement('canvas');
+                    let ctx = canvas.getContext('2d');
+                    
+                    // Giữ nguyên toàn bộ bức ảnh giáo viên chụp.
+                    // Chỉ nén độ phân giải xuống tối đa 1920px (bằng đúng chuẩn Full HD của Tivi) 
+                    // để nét căng mà không làm đơ mạng LAN.
+                    let MAX_SIZE = 1920; 
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height && width > MAX_SIZE) {
+                        height *= MAX_SIZE / width;
+                        width = MAX_SIZE;
+                    } else if (height > MAX_SIZE) {
+                        width *= MAX_SIZE / height;
+                        height = MAX_SIZE;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    // Xuất và gửi ảnh với chất lượng 90%
+                    let base64String = canvas.toDataURL('image/jpeg', 0.9);
+                    socket.emit('send_student_image', { image: base64String });
+                    
+                    //document.getElementById('status').innerText = "Đã chiếu ảnh NÉT CĂNG lên bảng!";
+                    
+                    // Reset thẻ input để có thể chụp liên tiếp tấm khác nếu muốn
+                    event.target.value = '';
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+
+        
+        // KHAI BÁO BIẾN CHO CÂU ĐÚNG/SAI (Đặt ngoài cùng)
+        let currentSubQuestion = 0; // 0=a, 1=b, 2=c, 3=d
+        let currentFullAnswer = "";
+        const subLetters = ['a', 'b', 'c', 'd'];
+
+        // TÍCH HỢP VÀO SỰ KIỆN RESET_LIVE CÓ SẴN
+        socket.on('reset_live', data => {
+            //Reset trạng thái ẩn hiện mọi thứ trên màn hình
+            setHideButtonUI(false);
+            // --- THÊM DÒNG NÀY ĐỂ KHÔNG BỊ LỖI MẤT BIẾN newQ ---
+            let newQ = parseInt(data.question);
+
+            // 1. Lấy dữ liệu gốc, nếu null hoặc undefined thì mặc định là chuỗi rỗng
+            let rawA = data.answer || ""; 
+            let newA = "-"; // Mặc định nếu không có dữ liệu
+
+            // 2. Xử lý logic hiển thị đáp án
+            if (rawA.length === 1) {
+                newA = rawA; // Có 1 ký tự (A, B, C, D hoặc '-') thì giữ nguyên
+            } else if (rawA.length >= 2) {
+                // Từ 2 ký tự trở lên: Thay toàn bộ 'A' thành 'Đ', và 'B' thành 'S'
+                newA = rawA.replace(/A/g, 'Đ').replace(/B/g, 'S');
+            }
+
+            //if (newQ !== currentQuestion) {
+            //    currentQuestion = newQ;
+                // Cập nhật lại giao diện hiển thị: "Câu x: ĐSĐS" hoặc "Câu x: A"
+            //    document.getElementById('q-num').innerText = currentQuestion + ": " + newA;
+            //}
+            //Bỏ điều kiện if để nếu 2 slide trùng số câu nhưng khác đáp án vẫn cập nhật đúng
+            currentQuestion = newQ;
+            document.getElementById('q-num').innerText = currentQuestion + ": " + newA;
+            
+            confirmedScans = {}; throttleSend = {};
+            
+            isResultBoardOpen = false;
+            let btn = document.getElementById('btnToggleResult');
+            if(btn) { btn.innerText = "CHỐT ĐÁP ÁN"; btn.style.background = "#2ed573"; }
+
+            // ==========================================================
+            // XỬ LÝ GIAO DIỆN CHỌN Ý (a,b,c,d) NGAY TRONG LÚC RESET
+            // ==========================================================
+            currentFullAnswer = data.answer || ""; // Hứng đáp án (VD: "ABAB" hoặc "A")
+            let subQContainer = document.getElementById('sub-questions');
+
+            if (currentFullAnswer.length > 1) {
+                // LÀ CÂU ĐÚNG/SAI -> HIỆN NÚT
+                currentSubQuestion = 0; 
+                if(subQContainer) subQContainer.style.display = "block";
+                renderSubQuestionUI();
+                //document.getElementById('status').innerText = "Chọn ý (a,b,c,d) để quét";
+
+                // THÊM MỚI 1: Báo PC biết đang ở ý 'a'
+                socket.emit('switch_sub_question', { sub_letter: 'a' });
+            } else {
+                // LÀ CÂU TRẮC NGHIỆM THƯỜNG -> ẨN NÚT
+                if(subQContainer) subQContainer.style.display = "none";
+                
+                //if (isScanning) {
+                    //document.getElementById('status').innerText = `Đang mở Cam - Quét Câu ${currentQuestion} (${currentFullAnswer})`;
+                //} else {
+                //    document.getElementById('status').innerText = `Đã tắt Cam - Đang ở Câu ${currentQuestion} (${currentFullAnswer}) `;
+                //}
+                // THÊM MỚI 2: Báo PC biết là câu thường (không có ý phụ)
+                socket.emit('switch_sub_question', { sub_letter: '' });
+            }
+            // ==========================================================
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        // 2 HÀM PHỤ TRỢ ĐỂ VẼ VÀ ĐỔI MÀU NÚT
+        function renderSubQuestionUI() {
+            let html = "";
+            for(let i = 0; i < currentFullAnswer.length; i++) {
+                let isAct = (i === currentSubQuestion) ? "background:#ffeb3b; color:black;" : "background:#475569; color:white;";
+                
+                // 1. Lấy ký tự gốc từ đáp án (VD: 'A', 'B', 'C'...)
+                let rawChar = currentFullAnswer[i]; 
+                
+                // 2. Phiên dịch sang Đ / S và Bắt lỗi gõ nhầm
+                let displayChar = "";
+                let textColor = ""; // Đổi màu chữ nếu bị lỗi
+                
+                if (rawChar === 'A') {
+                    displayChar = "Đ";
+                } else if (rawChar === 'B') {
+                    displayChar = "S";
+                } else {
+                    // Nếu giáo viên gõ nhầm C, D...
+                    displayChar = "LỖI"; 
+                    textColor = "color: #ff4757;"; // Cảnh báo chữ đỏ
+                }
+
+                html += `<button onclick="changeSub(${i})" style="padding:4px 14px; margin: 2px; font-weight:bold; border:none; border-radius:4px; font-size:16px; ${isAct} ${textColor}">
+                            Ý ${subLetters[i]}
+                         </button>`;
+                //Ý ${subLetters[i]} (${displayChar})
+            }
+            if(document.getElementById('sub-questions')) {
+                document.getElementById('sub-questions').innerHTML = html;
+            }
+        }
+
+        function changeSub(index) {
+            currentSubQuestion = index;
+            renderSubQuestionUI();
+            // --- THÊM 2 DÒNG NÀY ĐỂ XÓA TRÍ NHỚ ĐIỆN THOẠI KHI CHUYỂN Ý ---
+            confirmedScans = {};
+            throttleSend = {};
+            // -----------------------------------------------------------
+            // THÊM MỚI 3: Báo PC dọn dẹp khi thầy đổi ý bằng tay
+            socket.emit('switch_sub_question', { sub_letter: subLetters[index] });
+        }
+
+
+
+        
+        let currentRatio = 16/9; // Mặc định
+
+        // 1. Vừa mở web lên là hỏi máy tính xem đang cài đặt tỷ lệ nào
+        socket.emit('request_ratio');
+
+        // 2. Khi Form chính (trên máy tính) thay đổi tỷ lệ, web sẽ tự cập nhật ngay lập tức
+        socket.on('set_ratio', data => {
+            if (data.ratio === "4/3") {
+                currentRatio = 4 / 3;
+                document.getElementById('crop-guide').style.aspectRatio = "4/3";
+            } else {
+                currentRatio = 16 / 9;
+                document.getElementById('crop-guide').style.aspectRatio = "16/9";
+            }
+        });
+
+        // 3. Hàm chụp và tự động xén theo tỷ lệ
+        function snapAndSend() {
+            if (!isScanning || !video) return;
+            //document.getElementById('status').innerText = "Đang xử lý ảnh...";
+            let guide = document.getElementById('crop-guide');
+            
+            let vw = video.videoWidth;
+            let vh = video.videoHeight;
+            
+            let cropW, cropH;
+            
+            // Tính toán cắt theo tỷ lệ mà Form chính đang chọn (currentRatio)
+            if (vw / vh > currentRatio) {
+                cropH = vh;
+                cropW = vh * currentRatio;
+            } else {
+                cropW = vw;
+                cropH = vw / currentRatio;
+            }
+            
+            let cropX = (vw - cropW) / 2;
+            let cropY = (vh - cropH) / 2;
+            
+            let tempCanvas = document.createElement('canvas');
+            tempCanvas.width = cropW; 
+            tempCanvas.height = cropH;
+            
+            // Vẽ ảnh siêu nét vào
+            tempCanvas.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+            
+            // Gửi đi
+            socket.emit('send_student_image', { image: tempCanvas.toDataURL('image/jpeg', 0.9) });
+            
+            guide.style.backgroundColor = "rgba(255,255,255,0.7)";
+            setTimeout(() => { guide.style.backgroundColor = "transparent"; }, 150);
+            //document.getElementById('status').innerText = "Đã chiếu bài làm lên bảng!";
+        }
+
+        // BIẾN THEO DÕI TRẠNG THÁI NÚT CHỤP ẢNH
+        let isImageProjected = false;
+
+        function handleImageButton() {
+            if (!isScanning || !video) return;
+            let btn = document.getElementById('btnSnap');
+
+            if (!isImageProjected) {
+                // TRẠNG THÁI 1: BẤM ĐỂ CHỤP VÀ GỬI ẢNH LÊN MÀN HÌNH
+                let guide = document.getElementById('crop-guide');
+                let vw = video.videoWidth;
+                let vh = video.videoHeight;
+                let cropW, cropH;
+                
+                if (vw / vh > currentRatio) {
+                    cropH = vh; cropW = vh * currentRatio;
+                } else {
+                    cropW = vw; cropH = vw / currentRatio;
+                }
+                
+                let cropX = (vw - cropW) / 2;
+                let cropY = (vh - cropH) / 2;
+                
+                let tempCanvas = document.createElement('canvas');
+                tempCanvas.width = cropW; tempCanvas.height = cropH;
+                tempCanvas.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                
+                socket.emit('send_student_image', { image: tempCanvas.toDataURL('image/jpeg', 0.9) });
+                
+                guide.style.backgroundColor = "rgba(255,255,255,0.7)";
+                setTimeout(() => { guide.style.backgroundColor = "transparent"; }, 150);
+                
+                // ĐỔI GIAO DIỆN NÚT THÀNH NÚT STOP (MÀU ĐỎ, BIỂU TƯỢNG VUÔNG)
+                // ĐỔI GIAO DIỆN NÚT THÀNH NÚT TẮT ẢNH (DẤU X)
+                btn.style.background = "#ff4757";
+                btn.innerHTML = "<div style='color: white; font-size: 36px; font-weight: bold; text-align: center; line-height: 25px; font-family: Arial;'>✕</div>";
+                isImageProjected = true;
+
+            } else {
+                // TRẠNG THÁI 2: ẢNH ĐANG ĐƯỢC CHIẾU -> BẤM ĐỂ ẨN ẢNH ĐI
+                socket.emit('hide_student_image');
+                resetSnapButton();
+            }
+        }
+
+        function resetSnapButton() {
+            let btn = document.getElementById('btnSnap');
+            if(btn) {
+                // TRẢ LẠI GIAO DIỆN NÚT CHỤP HÌNH MẶC ĐỊNH (TRÒN TRẮNG)
+                btn.style.background = "#ffffff";
+                btn.innerHTML = "";
+                isImageProjected = false;
+            }
+        }
+
+        // ========================================================
+        // GIAO THỨC CẢNH BÁO MẤT KẾT NỐI (SERVER SHUTDOWN / MẤT WI-FI)
+        // ========================================================
+        const disconnectOverlay = document.createElement('div');
+        disconnectOverlay.id = 'disconnect-banner';
+        disconnectOverlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(15, 23, 42, 0.95); z-index: 99999; display: none;
+            flex-direction: column; align-items: center; justify-content: center;
+            color: white; font-family: sans-serif; text-align: center; padding: 20px;
+            box-sizing: border-box; 
+        `;
+        disconnectOverlay.innerHTML = `
+            <!-- Thêm thẻ img chứa mã base64 tại đây -->          
+            <img src="{{ url_for('static', filename='logo.jpg') }}" alt="Logo" style="display: block; max-width: 150px; margin: 0 auto 15px auto; border-radius: 8px;">
+
+            <div style="font-size: 60px; margin: 0 auto 20px auto;">🔌</div>
+
+            <h2 style="color: #ef4444; margin: 0 auto 15px auto; font-size: 22px;">MẤT KẾT NỐI MÁY TÍNH!</h2>
+            <p style="color: #cbd5e1; font-size: 15px; max-width: 320px; line-height: 1.6;margin: 0 auto;">
+                Ứng dụng D-Plick trên máy tính đã bị tắt hoặc mất mạng Wi-Fi LAN.
+                Vui lòng mở lại ứng dụng trên máy tính, đảm bảo điện thoại và máy tính cùng chung mạng Wi-Fi rồi thử kết nối lại.
+            </p>
+            <div>
+            <button onclick="location.reload()" style="margin-top: 10px; background: #0284c7; color: white; border: 2px solid white; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer;">
+                🔄 Tải lại trang
+            </button>
+            </div>
+        `;
+        document.body.appendChild(disconnectOverlay);
+
+        // Bắt sự kiện máy tính tắt phần mềm hoặc rớt mạng
+        socket.on('disconnect', function() {
+            console.warn("⚠️ Mất kết nối với Server!");
+            disconnectOverlay.style.display = 'flex';
+        });
+
+        // Bắt sự kiện khi có mạng trở lại hoặc máy tính mở lại app
+        socket.on('connect', function() {
+            disconnectOverlay.style.display = 'none';
+        });
+        
+    </script>
+</body>
+</html>

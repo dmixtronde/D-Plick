@@ -1,0 +1,45 @@
+<resources>
+    <string name="app_name">D-Plick Scanner</string>
+    <string name="scanner_subtitle">Quét mã QR máy chủ D-Plick trong mạng LAN</string>
+    <string name="scanner_hint_align">Đưa mã QR trên màn hình máy tính vào khung ngắm</string>
+    <string name="scanner_flash_on">Tắt đèn pin</string>
+    <string name="scanner_flash_off">Bật đèn pin</string>
+    <string name="scanner_last_server_label">MÁY CHỦ GẦN NHẤT</string>
+    <string name="scanner_reconnect_action">Kết nối lại</string>
+    <string name="scanner_manual_ip_button">Nhập IP thủ công</string>
+    <string name="scanner_detected_prefix">Đã nhận diện: %1$s</string>
+    <string name="scanner_invalid_qr_error">Mã QR không phải địa chỉ máy chủ D-Plick hợp lệ</string>
+
+    <string name="permission_camera_title">Cần quyền truy cập Camera</string>
+    <string name="permission_camera_rationale">D-Plick Scanner cần Camera để quét mã QR kết nối máy chủ và quét thẻ đáp án ArUco của học sinh trong giao diện lớp học.</string>
+    <string name="permission_grant_button">Cấp quyền Camera</string>
+    <string name="permission_open_settings_button">Mở Cài đặt ứng dụng</string>
+    <string name="permission_denied_note">Bạn vẫn có thể nhập địa chỉ IP thủ công, nhưng tính năng quét thẻ trong WebView sẽ cần quyền Camera.</string>
+
+    <string name="manual_ip_sheet_title">Kết nối máy chủ D-Plick</string>
+    <string name="manual_ip_sheet_subtitle">Nhập địa chỉ IP LAN hiển thị trên máy tính. Đường dẫn /scanner sẽ được tự động bổ sung.</string>
+    <string name="manual_ip_field_label">Địa chỉ IP hoặc URL máy chủ</string>
+    <string name="manual_ip_field_placeholder">https://192.168.1.11:5000</string>
+    <string name="manual_ip_preview_label">Đường dẫn kết nối:</string>
+    <string name="manual_ip_connect_button">Kết nối ngay</string>
+    <string name="manual_ip_cancel_button">Đóng</string>
+    <string name="manual_ip_error_invalid">Vui lòng nhập địa chỉ IP hoặc URL hợp lệ (ví dụ: 192.168.1.11:5000)</string>
+
+    <string name="webview_loading_title">Đang kết nối D-Plick…</string>
+    <string name="webview_loading_hint">Đang thiết lập kết nối SSL nội bộ với máy chủ lớp học</string>
+    <string name="webview_error_title">Không thể kết nối máy chủ</string>
+    <string name="webview_error_body">Vui lòng kiểm tra phần mềm D-Plick đã bật trên máy tính và điện thoại đang dùng chung mạng Wi-Fi LAN.</string>
+    <string name="webview_retry_button">Thử kết nối lại</string>
+    <string name="webview_rescan_button">Quét lại mã QR</string>
+
+    <string name="exit_dialog_title">Quay lại quét mã QR?</string>
+    <string name="exit_dialog_message">Phiên kết nối D-Plick hiện tại sẽ tạm ngắt và camera sẽ sẵn sàng để quét mã máy chủ khác.</string>
+    <string name="exit_dialog_confirm">Quét lại QR</string>
+    <string name="exit_dialog_stay">Ở lại phiên</string>
+
+    <string name="cd_app_logo">Biểu tượng D-Plick Scanner</string>
+    <string name="cd_camera_permission">Biểu tượng quyền Camera</string>
+    <string name="cd_quick_reconnect">Kết nối nhanh máy chủ gần nhất</string>
+    <string name="cd_manual_ip">Nhập địa chỉ IP thủ công</string>
+    <string name="cd_error_connection">Lỗi kết nối mạng LAN</string>
+</resources>

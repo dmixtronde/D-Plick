@@ -1,0 +1,6 @@
+{
+  "name": "D-Plick Scanner",
+  "description": "Ứng dụng quét mã QR và kết nối WebView toàn màn hình tới máy chủ D-Plick LAN, hỗ trợ SSL tự ký và camera WebRTC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
